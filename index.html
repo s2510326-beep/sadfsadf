@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 복싱 게임</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            color: #d9534f;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+        }
+
+        .game-container {
+            border: 4px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            position: relative;
+            /* 가로 세로 비율을 유지하면서 반응형으로 만듦 */
+            width: 90vw;
+            max-width: 800px;
+            height: 50.625vw; /* 800 * (9/16) = 450px */
+            max-height: 450px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #f0f0f0; /* 캔버스 배경색 */
+        }
+
+        #message-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-size: 2rem;
+            font-weight: 700;
+            display: none; /* 평소에는 숨김 */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            z-index: 10;
+        }
+
+        .controls-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+            width: 100%;
+            max-width: 800px;
+            margin-top: 20px;
+        }
+
+        .control-box {
+            background-color: #fff;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px;
+            width: 40%;
+            min-width: 250px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .control-box h3 {
+            margin-top: 0;
+            color: #0275d8;
+        }
+         .control-box .player2 h3 {
+            color: #5cb85c;
+        }
+
+        .control-box ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        .control-box li {
+            margin-bottom: 5px;
+        }
+
+        #restartButton {
+            background-color: #d9534f;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 25px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: background-color 0.2s, transform 0.2s;
+        }
+
+        #restartButton:hover {
+            background-color: #c9302c;
+            transform: translateY(-2px);
+        }
+
+        #restartButton:active {
+            transform: translateY(1px);
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>2D 복싱 게임</h1>
+
+    <div class="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="message-overlay">
+            <span id="message-text"></span>
+        </div>
+    </div>
+
+    <button id="restartButton">다시 시작</button>
+
+    <div class="controls-container">
+        <div class="control-box player1">
+            <h3>플레이어 1 (파란색)</h3>
+            <ul>
+                <li><strong>이동 (좌/우):</strong> A / D</li>
+                <li><strong>점프:</strong> W</li>
+                <li><strong>일반 공격 (잽):</strong> H</li>
+                <li><strong>강한 공격 (훅):</strong> J</li>
+            </ul>
+        </div>
+        <div class="control-box player2">
+            <h3>플레이어 2 (초록색)</h3>
+            <ul>
+                <li><strong>이동 (좌/우):</strong> ← / →</li>
+                <li><strong>점프:</strong> ↑</li>
+                <li><strong>일반 공격 (잽):</strong> 숫자 2</li>
+                <li><strong>강한 공격 (훅):</strong> 숫자 3</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageOverlay = document.getElementById('message-overlay');
+        const messageText = document.getElementById('message-text');
+        const restartButton = document.getElementById('restartButton');
+
+        let player1, player2;
+        const keys = {};
+        let isGameOver = false;
+        let animationFrameId;
+        let lastTime = 0; // 델타 타임 계산을 위해 추가
+
+        // 게임 상수
+        const gravity = 0.6;
+        const groundLevel = 420; // 캔버스 높이 - 바닥 높이
+        const JUMP_POWER = -15;
+        const PLAYER_SPEED = 5;
+        const PLAYER_WIDTH = 50;
+        const PLAYER_HEIGHT = 100;
+        const JAB_DAMAGE = 3;
+        const HOOK_DAMAGE = 8;
+        // --- 시간 기반 (ms) 상수로 변경 ---
+        const JAB_COOLDOWN_MS = 100; // 0.5초 (사용자 요청)
+        const HOOK_COOLDOWN_MS = 1000; // 1초
+        const PUNCH_DURATION_MS = 250; // 0.25초
+        const STUN_DURATION_MS = 750; // 0.75초 (60fps 기준 45프레임)
+
+
+        // 플레이어 객체 생성 함수
+        function createPlayer(x, y, color) {
+            return {
+                x: x,
+                y: y,
+                width: PLAYER_WIDTH,
+                height: PLAYER_HEIGHT,
+                color: color,
+                health: 100,
+                yVelocity: 0,
+                isGrounded: false,
+                direction: (color === '#0275d8' ? 1 : -1), // 1: right, -1: left (P1 오른쪽, P2 왼쪽 시작)
+                isAttacking: false,
+                attackType: null, // 'jab' or 'hook'
+                attackTimer: 0, // 공격 지속 시간 (ms)
+                jabCooldown: 0, // 쿨다운 (ms)
+                hookCooldown: 0, // 쿨다운 (ms)
+                hasHitThisPunch: false, // 한 번의 펀치로 여러 번 맞지 않도록
+                isStunned: false, // 스턴 상태
+                stunTimer: 0, // 스턴 지속 시간 (ms)
+                // 펀치 박스
+                punchBox: {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                    color: 'red'
+                }
+            };
+        }
+
+        // 게임 초기화
+        function initGame() {
+            // 캔버스 크기 설정 (컨테이너에 맞춤)
+            const container = document.querySelector('.game-container');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            // 바닥 레벨 재조정 (캔버스 높이 기반)
+            const groundHeight = 30;
+            const effectiveGroundLevel = canvas.height - groundHeight;
+
+            player1 = createPlayer(canvas.width * 0.25, effectiveGroundLevel - PLAYER_HEIGHT, '#0275d8');
+            player2 = createPlayer(canvas.width * 0.75, effectiveGroundLevel - PLAYER_HEIGHT, '#5cb85c');
+            
+            // 전역 변수 참조 업데이트
+            window.groundLevel = effectiveGroundLevel;
+
+            isGameOver = false;
+            messageOverlay.style.display = 'none';
+            
+            // 기존 애니메이션 프레임이 있다면 취소
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            lastTime = 0; // lastTime 리셋
+            animationFrameId = requestAnimationFrame(gameLoop); // gameLoop 시작
+        }
+
+        // 키 입력 리스너
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+
+            if (isGameOver) return;
+
+            // --- 플레이어 1 공격 ---
+            // 스턴 상태가 아닐 때만 공격 가능
+            if (e.key === 'h' && !player1.isAttacking && player1.jabCooldown <= 0 && !player1.isStunned) {
+                startAttack(player1, 'jab', JAB_DAMAGE, JAB_COOLDOWN_MS);
+            }
+            if (e.key === 'j' && !player1.isAttacking && player1.hookCooldown <= 0 && !player1.isStunned) {
+                startAttack(player1, 'hook', HOOK_DAMAGE, HOOK_COOLDOWN_MS);
+            }
+
+            // --- 플레이어 2 공격 ---
+            // 스턴 상태가 아닐 때만 공격 가능
+            if (e.key === '2' && !player2.isAttacking && player2.jabCooldown <= 0 && !player2.isStunned) {
+                startAttack(player2, 'jab', JAB_DAMAGE, JAB_COOLDOWN_MS);
+            }
+            if (e.key === '3' && !player2.isAttacking && player2.hookCooldown <= 0 && !player2.isStunned) {
+                startAttack(player2, 'hook', HOOK_DAMAGE, HOOK_COOLDOWN_MS);
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        restartButton.addEventListener('click', initGame);
+        
+        // 창 크기 변경 시 캔버스 크기 조절
+        window.addEventListener('resize', initGame);
+
+        // 공격 시작
+        function startAttack(player, type, damage, cooldown) {
+            player.isAttacking = true;
+            player.attackType = type;
+            player.attackTimer = PUNCH_DURATION_MS; // ms로 변경
+            player.hasHitThisPunch = false;
+            if (type === 'jab') {
+                player.jabCooldown = cooldown; // ms로 변경
+            } else {
+                player.hookCooldown = cooldown; // ms로 변경
+            }
+        }
+
+        // 플레이어 업데이트
+        function updatePlayer(player, opponent, leftKey, rightKey, jumpKey, deltaTime) {
+            // deltaTime이 0이거나 비정상적일 경우 (첫 프레임, 탭 전환) 렉 방지
+            if (!deltaTime || deltaTime > 100) deltaTime = 1000 / 60; // 60fps 기준으로 가정
+            
+            // --- Stun Logic ---
+            if (player.isStunned) {
+                player.stunTimer -= deltaTime; // ms
+                if (player.stunTimer <= 0) {
+                    player.isStunned = false;
+                    player.stunTimer = 0;
+                }
+                // (중력 및 충돌 로직은 계속 적용됨)
+            }
+
+            // 쿨다운 감소
+            if (player.jabCooldown > 0) player.jabCooldown -= deltaTime;
+            if (player.hookCooldown > 0) player.hookCooldown -= deltaTime;
+
+            // 공격 타이머
+            if (player.isAttacking) {
+                player.attackTimer -= deltaTime;
+                if (player.attackTimer <= 0) {
+                    player.isAttacking = false;
+                    player.attackType = null;
+                }
+            }
+
+            // 60fps (16.67ms) 기준 1프레임
+            const logicDelta = deltaTime / (1000 / 60); 
+
+            // --- 이동 ---
+            // 스턴 상태가 아니거나 공격 중이 아닐 때만 이동
+            if (!player.isStunned && !player.isAttacking) { 
+                if (keys[leftKey]) {
+                    player.x -= PLAYER_SPEED * logicDelta; // 델타타임 보정
+                    player.direction = -1; // 왼쪽 방향
+                }
+                if (keys[rightKey]) {
+                    player.x += PLAYER_SPEED * logicDelta; // 델타타임 보정
+                    player.direction = 1; // 오른쪽 방향
+                }
+            }
+
+            // --- 점프 ---
+            // 점프는 순간적인 힘이므로 델타타임 보정 불필요
+            if (!player.isStunned && !player.isAttacking && keys[jumpKey] && player.isGrounded) { 
+                player.yVelocity = JUMP_POWER;
+                player.isGrounded = false;
+            }
+
+            // --- 중력 적용 ---
+            player.yVelocity += gravity * logicDelta; // 델타타임 보정
+            player.y += player.yVelocity * logicDelta; // 델타타임 보정
+
+            // --- 바닥 충돌 ---
+            if (player.y + player.height >= groundLevel) {
+                player.y = groundLevel - player.height;
+                player.yVelocity = 0;
+                player.isGrounded = true;
+            }
+
+            // --- 캔버스 경계 충돌 ---
+            if (player.x < 0) {
+                player.x = 0;
+            }
+            if (player.x + player.width > canvas.width) {
+                player.x = canvas.width - player.width;
+            }
+            
+            // --- 플레이어 간 충돌 (밀어내기) ---
+            /*
+            if (
+                player.x < opponent.x + opponent.width &&
+                player.x + player.width > opponent.x &&
+                player.y < opponent.y + opponent.height &&
+                player.y + player.height > opponent.y
+            ) {
+                // 겹치는 정도 계산
+                const overlapX = (player.x + player.width / 2) - (opponent.x + opponent.width / 2);
+                const combinedHalfWidths = player.width / 2 + opponent.width / 2;
+                
+                if (overlapX > 0) { // player가 opponent의 왼쪽에 있음
+                    const push = (combinedHalfWidths - overlapX) / 2;
+                    player.x -= push;
+                    opponent.x += push;
+                } else { // player가 opponent의 오른쪽에 있음
+                    const push = (combinedHalfWidths + overlapX) / 2;
+                    player.x += push;
+                    opponent.x -= push;
+                }
+            }
+            */
+
+
+            // --- 공격 충돌 감지 ---
+            if (player.isAttacking && !player.hasHitThisPunch) {
+                updatePunchBox(player, opponent); 
+                
+                // 펀치 박스와 상대방 히트박스 충돌 확인
+                if (
+                    player.punchBox.x < opponent.x + opponent.width &&
+                    player.punchBox.x + player.punchBox.width > opponent.x &&
+                    player.punchBox.y < opponent.y + opponent.height &&
+                    player.punchBox.y + player.punchBox.height > opponent.y
+                ) {
+                    // 히트!
+                    player.hasHitThisPunch = true; // 이번 펀치는 명중
+                    opponent.health -= (player.attackType === 'jab') ? JAB_DAMAGE : HOOK_DAMAGE;
+                    
+                    // 훅 공격이면 스턴 적용
+                    if (player.attackType === 'hook') {
+                        opponent.isStunned = true;
+                        opponent.stunTimer = STUN_DURATION_MS; // ms로 변경
+                    }
+                    
+                    // 넉백
+                    const knockbackDirection = player.direction; // 마지막으로 움직인 방향으로 넉백
+                    opponent.x += (player.attackType === 'jab' ? 5 : 15) * knockbackDirection;
+                    
+                    if (opponent.health < 0) opponent.health = 0;
+                }
+            }
+        }
+        
+        // 펀치 박스 위치 업데이트
+        function updatePunchBox(player, opponent) {
+            const direction = player.direction; // 상대 위치 대신 플레이어의 마지막 이동 방향 사용
+            
+            if (player.attackType === 'jab') {
+                player.punchBox.width = 40;
+                player.punchBox.height = 20;
+                player.punchBox.y = player.y + 20;
+                if (direction === 1) { // 오른쪽 공격
+                    player.punchBox.x = player.x + player.width;
+                } else { // 왼쪽 공격
+                    player.punchBox.x = player.x - player.punchBox.width;
+                }
+            } else if (player.attackType === 'hook') {
+                player.punchBox.width = 50;
+                player.punchBox.height = 30;
+                player.punchBox.y = player.y + 30;
+                if (direction === 1) { // 오른쪽 공격
+                    player.punchBox.x = player.x + player.width - 10;
+                } else { // 왼쪽 공격
+                    player.punchBox.x = player.x - player.punchBox.width + 10;
+                }
+            }
+        }
+
+        // 게임 상태 업데이트
+        function update(deltaTime) { // deltaTime 전달받음
+            if (isGameOver) return;
+
+            updatePlayer(player1, player2, 'a', 'd', 'w', deltaTime);
+            updatePlayer(player2, player1, 'ArrowLeft', 'ArrowRight', 'ArrowUp', deltaTime);
+
+            // --- 게임 종료 확인 ---
+            if (player1.health <= 0) {
+                endGame("플레이어 2 승리!");
+            } else if (player2.health <= 0) {
+                endGame("플레이어 1 승리!");
+            }
+        }
+
+        // 게임 종료 처리
+        function endGame(message) {
+            isGameOver = true;
+            messageText.textContent = message;
+            messageOverlay.style.display = 'flex';
+            // cancelAnimationFrame(animationFrameId); // 루프 시작 시 isGameOver로 체크
+        }
+
+        // 그리기
+        function draw() {
+            // 캔버스 클리어
+            ctx.fillStyle = '#ADD8E6'; // 하늘색 배경
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 바닥 그리기
+            ctx.fillStyle = '#8B4513'; // 갈색
+            ctx.fillRect(0, groundLevel, canvas.width, canvas.height - groundLevel);
+
+            // 플레이어 그리기
+            drawPlayer(player1);
+            drawPlayer(player2);
+
+            // 공격 그리기
+            if (player1.isAttacking) drawPunch(player1);
+            if (player2.isAttacking) drawPunch(player2);
+
+            // UI 그리기 (체력바)
+            drawUI();
+        }
+
+        // 플레이어 그리기
+        function drawPlayer(player) {
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            
+            // "눈" (방향 표시)
+            ctx.fillStyle = 'white';
+            const eyeX = (player.direction === 1) // 상대 위치 대신 플레이어 방향 사용
+                       ? player.x + player.width * 0.7 
+                       : player.x + player.width * 0.3;
+            ctx.fillRect(eyeX - 5, player.y + 15, 10, 10);
+            ctx.fillStyle = 'black';
+            ctx.fillRect(eyeX - 2, player.y + 18, 4, 4);
+
+            // --- 스턴 시각 효과 (별) ---
+            if (player.isStunned) {
+                ctx.fillStyle = 'yellow';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1;
+                ctx.font = 'bold 20px "Noto Sans KR"';
+                ctx.textAlign = 'center';
+                
+                // 별이 깜빡이도록 (타이머 값에 따라)
+                const starChar = (player.stunTimer % 10 > 5) ? '★' : '☆';
+                
+                ctx.fillText(starChar, player.x + player.width / 2 - 10, player.y - 10);
+                ctx.strokeText(starChar, player.x + player.width / 2 - 10, player.y - 10);
+                
+                ctx.fillText(starChar, player.x + player.width / 2 + 10, player.y - 15);
+                ctx.strokeText(starChar, player.x + player.width / 2 + 10, player.y - 15);
+                
+                ctx.textAlign = 'left'; // 기본값 복원
+                ctx.lineWidth = 1; // 기본값 복원
+            }
+        }
+
+        // 펀치 그리기
+        function drawPunch(player) {
+            ctx.fillStyle = player.punchBox.color;
+            ctx.fillRect(player.punchBox.x, player.punchBox.y, player.punchBox.width, player.punchBox.height);
+        }
+
+        // UI 그리기
+        function drawUI() {
+            const barWidth = (canvas.width / 2) - 40;
+            const barHeight = 30;
+
+            // --- 플레이어 1 체력바 ---
+            ctx.fillStyle = '#333';
+            ctx.fillRect(20, 20, barWidth, barHeight); // 배경
+            ctx.fillStyle = player1.color;
+            ctx.fillRect(20, 20, (player1.health / 100) * barWidth, barHeight); // 체력
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 16px "Noto Sans KR"';
+            ctx.fillText(`P1: ${player1.health}%`, 25, 42);
+
+            // --- 플레이어 2 체력바 ---
+            const p2BarX = canvas.width - barWidth - 20;
+            ctx.fillStyle = '#333';
+            ctx.fillRect(p2BarX, 20, barWidth, barHeight); // 배경
+            ctx.fillStyle = player2.color;
+            ctx.fillRect(p2BarX + (barWidth - (player2.health / 100) * barWidth), 20, (player2.health / 100) * barWidth, barHeight); // 체력 (오른쪽 정렬)
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'right';
+            ctx.fillText(`P2: ${player2.health}%`, canvas.width - 25, 42);
+            ctx.textAlign = 'left'; // 기본값으로 복원
+        }
+
+
+        // 메인 게임 루프
+        function gameLoop(timestamp) {
+            if (isGameOver) {
+                return;
+            }
+
+            if (!lastTime) {
+                lastTime = timestamp;
+            }
+            
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            // 탭이 비활성화되는 등 델타가 너무 크면 무시
+            if (deltaTime > 100) { 
+                animationFrameId = requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            update(deltaTime);
+            draw();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // 게임 시작
+        initGame();
+    </script>
+
+</body>
+</html>
+
